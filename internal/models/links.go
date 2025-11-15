@@ -11,15 +11,16 @@ type SetNumsOfLinksGet struct {
 type LinksAnswer map[string]string
 
 type ProcessedLinks struct {
-	Answer  []LinksAnswer `json:"links"`
-	ListNum int           `json:"links_num"`
+	Answer  LinksAnswer `json:"links"`
+	ListNum int         `json:"links_num"`
 }
 
 type ListOfProcessedLinks struct {
-	//TODO pdf
+	Description string `json:"description,omitempty"`
+	PDF         []byte `json:"-"`
 }
 
 type AllUnfinishedWork struct {
-	pdfs  []ListOfProcessedLinks
-	links []ProcessedLinks
+	Pdfs  []ListOfProcessedLinks `json:"pdfs,omitempty"`
+	Links []ProcessedLinks       `json:"links,omitempty"`
 }

@@ -8,13 +8,10 @@ import (
 )
 
 type Config struct {
-	ServerPort    string `env:"PORT" envDefault:"8080"`
-	PG_DBHost     string `env:"DB_PG_HOST" envDefault:"postgres"`
-	PG_DBUser     string `env:"DB_PG_USER" envDefault:"webuser"`
-	PG_DBPassword string `env:"DB_PG_PASSWORD" envDefault:"1111"`
-	PG_DBName     string `env:"DB_PG_NAME" envDefault:"webdev"`
-	PG_DBSSLMode  string `env:"DB_PG_SSLMODE" envDefault:"disable"`
-	PG_PORT       string `env:"DB_PG_PORT" envDefault:"5432"`
+	ServerPort                string `env:"PORT" envDefault:"8080"`
+	NameFileAllTasks          string `env:"ALL_TASKS_FILE" envDefault:"storage/AllTasks.json"`
+	NameFileProcessTasksLinks string `env:"PROCESS_LINKS_FILE" envDefault:"storage/ProcessTasksLinks.json"`
+	NameFileProcessTasksNums  string `env:"PROCESS_NUMS_FILE" envDefault:"storage/ProcessTasksNums.json"`
 }
 
 func MustLoad() *Config {

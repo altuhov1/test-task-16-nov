@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"status-links/internal/config"
 	"status-links/internal/handlers"
+	"status-links/internal/services"
+	"status-links/internal/storage"
 	"syscall"
 	"time"
 )
@@ -20,9 +22,12 @@ type App struct {
 }
 
 type Services struct {
+	LinksService services.LinkProcessor
 }
 
 type Storages struct {
+	temp     storage.TempStorage
+	reliable storage.ReliableStorage
 }
 
 func NewApp(cfg *config.Config) *App {
@@ -39,15 +44,24 @@ func NewApp(cfg *config.Config) *App {
 }
 
 func (a *App) initStorages() {
-	
+	a.storages = &Storages{
+		temp: storage.NewTempStorage(),
+		reliable: storage.NewReliableStorage(
+			a.cfg.NameFileAllTasks,
+			a.cfg.NameFileProcessTasksLinks,
+			a.cfg.NameFileProcessTasksNums,
+		),
+	}
 }
 
 func (a *App) initServices() {
-	a.services = &Services{}
+	a.services = &Services{
+		LinksService: services.NewLinksService(a.storages.temp, a.storages.reliable),
+	}
 }
 
 func (a *App) initHTTP() {
-	handler, err := handlers.NewHandler()
+	handler, err := handlers.NewHandler(a.services.LinksService)
 	if err != nil {
 		slog.Error("Failed to create handler", "error", err)
 		os.Exit(1)
@@ -67,20 +81,21 @@ func (a *App) initHTTP() {
 func (a *App) setupRoutes(handler *handlers.Handler) http.Handler {
 	mux := http.NewServeMux()
 
+	// Static files
+	fs := http.FileServer(http.Dir("static"))
+	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 
 	// API routes
-	apiRoutes := map[string]http.HandlerFunc{}
+	apiRoutes := map[string]http.HandlerFunc{
+		"/api/loadUnfinishedWork": handler.LoadUnfinishedWork,
+		"/api/saveNewUrls":        handler.SaveNewUrls,
+		"/api/loadUrls":           handler.LoadUrls,
+	}
 
 	for path, handlerFunc := range apiRoutes {
 		mux.HandleFunc(path, handlerFunc)
 	}
 
-	// Web routes
-	webRoutes := map[string]http.HandlerFunc{}
-
-	for path, handlerFunc := range webRoutes {
-		mux.HandleFunc(path, handlerFunc)
-	}
 	return mux
 }
 
@@ -114,5 +129,6 @@ func (a *App) shutdown() {
 		slog.Error("Server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
+	a.services.LinksService.WaitForCompletion()
 	slog.Info("Server stopped")
 }
