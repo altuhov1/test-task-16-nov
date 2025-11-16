@@ -30,6 +30,14 @@
 | `/api/loadUrls`              | GET   | Возвращает PDF-отчёт по ID задач       |
 | `/api/loadUnfinishedWork`    | GET   | Восстанавливает и завершает "зависшие" задачи, возвращает результат (Zip с .txt и .PDFs) |
 
+
+----
+## Запуск
+```bash
+make build
+./bin/status-links
+```
+---
 ### Примеры использования
 
 ## 1. Отправка новых URL для проверки
@@ -57,7 +65,7 @@ curl http://localhost:8080/api/loadUnfinishedWork --output result.pdf
 ```
 ### Тестирование
 ```bash
-go test -cover ./...
+make test
 ```
 ---
 ## Скриншоты
