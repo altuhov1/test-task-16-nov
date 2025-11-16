@@ -1,8 +1,5 @@
 # Status Links Service
 
-[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://golang.org)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
 Микросервис для массовой проверки доступности URL-адресов с генерацией PDF-отчётов и поддержкой восстановления незавершённых задач после перезапуска.
 
 > Идеально подходит для аудита ссылок, мониторинга внешних ресурсов и регулярных проверок в CI/CD-процессах.
