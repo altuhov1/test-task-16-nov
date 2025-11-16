@@ -64,6 +64,6 @@ go test -cover ./...
 <div align="center">
 
 ### Результат подгрузки незавершеннх процессов
-
+![Форма регистрации](./static/photo/photoForREADME/photo.png) 
 
 </div>
