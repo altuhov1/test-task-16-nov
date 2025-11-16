@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,10 @@ import (
 	"time"
 
 	"github.com/jung-kurt/gofpdf"
+)
+
+var (
+	ErrTooBigIndex = errors.New("too big index")
 )
 
 type LinksService struct {
@@ -33,9 +38,7 @@ func NewLinksService(temp storage.TempStorage, reliable storage.ReliableStorage)
 	return service
 }
 
-// В services/link_service.go
 func (l *LinksService) UploadAllUnfinishedWork() *models.AllUnfinishedWork {
-	// Получаем незавершенные задачи из надежного хранилища
 	pendingLinks, err := l.reliable.GetPendingLinksData()
 	if err != nil {
 		slog.Error("Error getting pending links", "error", err)
@@ -60,15 +63,9 @@ func (l *LinksService) UploadAllUnfinishedWork() *models.AllUnfinishedWork {
 		}
 	}
 
-	slog.Info("UploadAllUnfinishedWork: found pending tasks",
-		"pending_links", len(pendingLinks),
-		"pending_nums", len(pendingNums))
-
 	result := &models.AllUnfinishedWork{}
 
-	// Если нет незавершенных задач - сразу возвращаем сообщение
 	if len(pendingLinks) == 0 && len(pendingNums) == 0 {
-		slog.Info("No unfinished work found")
 		return &models.AllUnfinishedWork{
 			Pdfs: []models.ListOfProcessedLinks{
 				{
@@ -78,17 +75,14 @@ func (l *LinksService) UploadAllUnfinishedWork() *models.AllUnfinishedWork {
 		}
 	}
 
-	// Обрабатываем задачи только если они есть
-	for i, linkSet := range pendingLinks {
-		slog.Info("Processing link set", "index", i, "links_count", len(linkSet.Links))
+	for _, linkSet := range pendingLinks {
 		processed := l.processLinks(linkSet)
 		if processed != nil {
 			result.Links = append(result.Links, *processed)
 		}
 	}
 
-	for i, numSet := range pendingNums {
-		slog.Info("Processing PDF set", "index", i, "nums_count", len(numSet.NumsLinks))
+	for _, numSet := range pendingNums {
 		pdfResult := l.generatePDF(numSet)
 		if pdfResult != nil {
 			result.Pdfs = append(result.Pdfs, *pdfResult)
@@ -102,7 +96,6 @@ func (l *LinksService) UploadAllUnfinishedWork() *models.AllUnfinishedWork {
 	return result
 }
 func (l *LinksService) uploadAllToFastMem() *models.ProcessedLinks {
-	// Переносим все данные из надежного хранилища во временное
 	allData, err := l.reliable.ReadAllFile()
 	if err != nil {
 		return &models.ProcessedLinks{
@@ -111,7 +104,6 @@ func (l *LinksService) uploadAllToFastMem() *models.ProcessedLinks {
 		}
 	}
 
-	// Выгружаем все данные во временное хранилище
 	l.temp.UploadAllData(allData)
 
 	return &models.ProcessedLinks{
@@ -121,26 +113,22 @@ func (l *LinksService) uploadAllToFastMem() *models.ProcessedLinks {
 }
 
 func (l *LinksService) AddLinkSet(set models.SetLinksGet) *models.ProcessedLinks {
-	// СИНХРОННО обрабатываем ссылки и сразу возвращаем результат
 	hash, err := l.reliable.AddLinksProcessList(&set)
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
+		slog.Error("error in AddLinksProcessList", "error", err)
 	}
 
 	answer := make(models.LinksAnswer)
 
-	// Проверяем статус каждой ссылки
 	for _, url := range set.Links {
 		status := l.checkLinkStatus(url)
 		answer[url] = status
 	}
 
-	// Сохраняем во временное хранилище и получаем номер
 	listNum := l.temp.UploadNewData(&models.ProcessedLinks{
 		Answer: answer,
 	})
 
-	// Сохраняем в надежное хранилище (асинхронно)
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
@@ -148,15 +136,14 @@ func (l *LinksService) AddLinkSet(set models.SetLinksGet) *models.ProcessedLinks
 			Answer:  answer,
 			ListNum: listNum,
 		}
-		if err := l.reliable.AddNewLinkAllFileTask(processed); err != nil {
-			fmt.Printf("Failed to save processed links: %v\n", err)
+		if err := l.reliable.AddNewLinkPerm(processed); err != nil {
+			slog.Error("failed to save processed links:", "error", err)
 		}
 	}()
 
-	// Немедленно возвращаем результат с номером набора
 	err = l.reliable.RemoveLinksProcessByHash(hash)
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
+		slog.Error("error in RemoveLinksProcessByHash", "error", err)
 	}
 	return &models.ProcessedLinks{
 		Answer:  answer,
@@ -164,43 +151,45 @@ func (l *LinksService) AddLinkSet(set models.SetLinksGet) *models.ProcessedLinks
 	}
 }
 
-func (l *LinksService) GiveLinkAnswer(list models.SetNumsOfLinksGet) *models.ListOfProcessedLinks {
+func (l *LinksService) GiveLinkAnswer(list models.SetNumsOfLinksGet) (*models.ListOfProcessedLinks, error) {
+	maxInt := l.temp.ReturnMaxIndex()
+	for _, v := range list.NumsLinks {
+		if v > maxInt {
+			return nil, ErrTooBigIndex
+		}
+	}
 	hash, err := l.reliable.AddNumProcessList(&list)
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
+		slog.Error("error in AddNumProcessList", "error", err)
+
 	}
-	// СИНХРОННО генерируем PDF и сразу возвращаем результат
 	result := l.generatePDF(list)
 
-	// Асинхронно сохраняем в pending и удаляем (для отслеживания незавершенных работ)
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
 		hash, err := l.reliable.AddNumProcessList(&list)
 		if err != nil {
-			fmt.Printf("Failed to add to pending: %v\n", err)
+			slog.Error("failed to add to pending:", "error", err)
 			return
 		}
-		// Немедленно удаляем, так как задача уже выполнена
 		l.reliable.RemoveNumsProcessByHash(hash)
 	}()
 	err = l.reliable.RemoveNumsProcessByHash(hash)
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
+		slog.Error("error in RemoveNumsProcessByHash", "error", err)
 	}
-	return result
+	return result, nil
 }
 
 func (l *LinksService) processLinks(set models.SetLinksGet) *models.ProcessedLinks {
 	answer := make(models.LinksAnswer)
 
-	// Проверяем статус каждой ссылки
 	for _, url := range set.Links {
 		status := l.checkLinkStatus(url)
 		answer[url] = status
 	}
 
-	// Сохраняем во временное хранилище и получаем номер
 	listNum := l.temp.UploadNewData(&models.ProcessedLinks{
 		Answer: answer,
 	})
@@ -212,7 +201,6 @@ func (l *LinksService) processLinks(set models.SetLinksGet) *models.ProcessedLin
 }
 
 func (l *LinksService) checkLinkStatus(url string) string {
-	// Добавляем схему если отсутствует
 	fullURL := url
 	if !hasScheme(url) {
 		fullURL = "https://" + url
@@ -231,7 +219,6 @@ func (l *LinksService) checkLinkStatus(url string) string {
 }
 
 func (l *LinksService) generatePDF(set models.SetNumsOfLinksGet) *models.ListOfProcessedLinks {
-	// Получаем данные по номерам
 	linksAnswers, err := l.temp.FindKeys(&set)
 	if err != nil {
 		return &models.ListOfProcessedLinks{
@@ -246,7 +233,6 @@ func (l *LinksService) generatePDF(set models.SetNumsOfLinksGet) *models.ListOfP
 		}
 	}
 
-	// Создаем PDF
 	pdf := gofpdf.New("P", "mm", "A4", "")
 	pdf.AddPage()
 	pdf.SetFont("Arial", "B", 16)
@@ -286,8 +272,6 @@ func (l *LinksService) generatePDF(set models.SetNumsOfLinksGet) *models.ListOfP
 func (l *LinksService) WaitForCompletion() {
 	l.wg.Wait()
 }
-
-// Вспомогательная функция
 func hasScheme(url string) bool {
 	return len(url) > 7 && (url[0:7] == "http://" || url[0:8] == "https://")
 }

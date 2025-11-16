@@ -1,3 +1,7 @@
 .DS_Store
 .vscode/
 .env
+
+AllTasks.json
+ProcessTasksLinks.json
+ProcessTasksNums.json

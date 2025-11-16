@@ -54,3 +54,7 @@ func (s *tempStorageMap) FindKeys(list *models.SetNumsOfLinksGet) (*[]models.Lin
 	}
 	return &bs, nil
 }
+
+func (s *tempStorageMap) ReturnMaxIndex() int {
+	return s.lastNum
+}

@@ -10,7 +10,6 @@ import (
 	"os"
 	"status-links/internal/models"
 	"status-links/internal/services"
-	"time"
 )
 
 type Handler struct {
@@ -29,10 +28,8 @@ func (h *Handler) LoadUnfinishedWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем данные о незавершенных работах
 	unfinishedWork := h.LinkService.UploadAllUnfinishedWork()
 
-	// Если есть PDF файлы ИЛИ есть ссылки - создаем ZIP архив
 	var pdfsWithData []models.ListOfProcessedLinks
 	for _, pdf := range unfinishedWork.Pdfs {
 		if len(pdf.PDF) > 0 {
@@ -64,22 +61,18 @@ func (h *Handler) SaveNewUrls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Валидация входных данных
 	if len(req.Links) == 0 {
 		http.Error(w, `{"error":"no links provided"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Проверяем максимальное количество ссылок
 	if len(req.Links) > 100 {
 		http.Error(w, `{"error":"too many links, maximum 100"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Используем AddLinkSet для обработки ссылок
 	result := h.LinkService.AddLinkSet(req)
 
-	// Возвращаем ответ в требуемом формате
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -92,7 +85,7 @@ func (h *Handler) SaveNewUrls(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) LoadUrls(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -105,28 +98,32 @@ func (h *Handler) LoadUrls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Валидация входных данных
 	if len(req.NumsLinks) == 0 {
 		http.Error(w, `{"error":"no link numbers provided"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Проверяем максимальное количество номеров
 	if len(req.NumsLinks) > 50 {
 		http.Error(w, `{"error":"too many link numbers, maximum 50"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Передаем данные в сервис для генерации PDF
-	result := h.LinkService.GiveLinkAnswer(req)
+	result, err := h.LinkService.GiveLinkAnswer(req)
+	if err == services.ErrTooBigIndex {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "invalid_index",
+			"message": "One or more link numbers are out of range",
+		})
+		return
+	}
 
-	// Если есть PDF - отправляем его
 	if len(result.PDF) > 0 {
 		h.sendPDFResponse(w, result.PDF, "links_report")
 		return
 	}
 
-	// Иначе возвращаем статус обработки
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -144,12 +141,9 @@ func (h *Handler) sendPDFResponse(w http.ResponseWriter, pdfData []byte, filenam
 }
 
 func (h *Handler) createZipResponse(w http.ResponseWriter, pdfs []models.ListOfProcessedLinks, links []models.ProcessedLinks, baseFilename string) {
-	slog.Info("Creating ZIP", "pdfs", len(pdfs), "links", len(links))
-
 	buf := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(buf)
 
-	// 1. Добавляем PDF файлы
 	for i, pdf := range pdfs {
 		if len(pdf.PDF) > 0 {
 			filename := fmt.Sprintf("report_%d.pdf", i+1)
@@ -166,7 +160,6 @@ func (h *Handler) createZipResponse(w http.ResponseWriter, pdfs []models.ListOfP
 		}
 	}
 
-	// 2. Добавляем текстовый файл с информацией о ссылках
 	if len(links) > 0 {
 		writer, err := zipWriter.Create("links_info.txt")
 		if err != nil {
@@ -192,19 +185,15 @@ func (h *Handler) createZipResponse(w http.ResponseWriter, pdfs []models.ListOfP
 		}
 	}
 
-	// Закрываем ZIP
 	if err := zipWriter.Close(); err != nil {
 		slog.Error("Failed to close ZIP", "error", err)
 		http.Error(w, "Failed to create ZIP archive", http.StatusInternalServerError)
 		return
 	}
 
-	// ДЕБАГ: Сохраняем ZIP в файл для проверки
 	debugFilename := "debug_unfinished_work.zip"
 	if err := os.WriteFile(debugFilename, buf.Bytes(), 0644); err != nil {
 		slog.Error("Failed to save debug ZIP", "error", err)
-	} else {
-		slog.Info("Debug ZIP saved", "filename", debugFilename, "size", buf.Len())
 	}
 
 	slog.Info("ZIP created successfully", "size", buf.Len())
@@ -214,22 +203,7 @@ func (h *Handler) createZipResponse(w http.ResponseWriter, pdfs []models.ListOfP
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", buf.Len()))
 	w.WriteHeader(http.StatusOK)
 
-	// Отправляем данные
 	if _, err := buf.WriteTo(w); err != nil {
 		slog.Error("Failed to send ZIP", "error", err)
 	}
-}
-
-// Хендлер для health check
-func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":    "healthy",
-		"timestamp": time.Now().Format(time.RFC3339),
-	})
 }

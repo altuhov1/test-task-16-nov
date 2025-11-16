@@ -79,7 +79,7 @@ func (s *reliableStorageJsonFile) ReadAllFile() (*[]models.ProcessedLinks, error
 	}
 	return &data.DataAn, nil
 }
-func (s *reliableStorageJsonFile) AddNewLinkAllFileTask(item *models.ProcessedLinks) error {
+func (s *reliableStorageJsonFile) AddNewLinkPerm(item *models.ProcessedLinks) error {
 	s.muAllTasks.Lock()
 	defer s.muAllTasks.Unlock()
 	file, err := os.Open(s.NameFileAllTasks)
@@ -199,11 +199,6 @@ func (s *reliableStorageJsonFile) AddNumProcessList(masLinks *models.SetNumsOfLi
 		if os.IsNotExist(err) {
 			data = []ProcessTasksNums{}
 		} else {
-			file, err := os.Create(s.NameFileAllTasks)
-			if err != nil {
-				return "", fmt.Errorf("failed to create storage file: %w", err)
-			}
-			file.Close()
 			return "", err
 		}
 	} else {
