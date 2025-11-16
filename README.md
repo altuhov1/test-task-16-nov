@@ -35,6 +35,7 @@
 ## Запуск
 ```bash
 make build
+
 ./bin/status-links
 ```
 ---
